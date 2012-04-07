@@ -41,10 +41,13 @@ public slots:
     void winCoords(int *x1, int *y1, int *x2, int *y2);
     int numOfWinPlaces(int x, int y, int n);
     int dropPiece(int player, int column);
+    bool makeMove(int player, int column, int *row);
+    bool makeMove(int player, int column);
+    int getLastAIcolumn();
+    int getLastAIrow();
 
 private:
     void poll(void (*poll_func)(void), clock_t interval);
-    bool makeMove(int player, int column, int *row);
     bool autoMove(int player, int level, int *column, int *row);
     char** board(void);
     int scoreOfPlayer(int player);
@@ -74,6 +77,8 @@ private:
     int states_allocated;
     int *drop_order;
     
+    int lastAIcolumn;
+    int lastAIrow;
 };
 
 #endif // ENGINE_H

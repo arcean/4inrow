@@ -17,69 +17,14 @@ Engine::Engine(QObject *parent) :
     int width, height, num_to_connect;
     int x1, y1, x2, y2;
 
-    width = 20;
-    height = 16;
+    width = 10;
+    height = 8;
     num_to_connect = 4;
     num_of_players = 1;
+    poll_function = NULL;
 
-    switch (num_of_players) {
-
-        case 0:
-            player[0] = player[1] = COMPUTER;
-            turn = 0;
-            printf("\nUnsupported!\n");
-            break;
-
-        case 1:
-            player[0] = HUMAN;
-            player[1] = COMPUTER;
-            level[1] = 5; // AI skill
-            turn = 0; // HUMAN first
-            break;
-
-        case 2:
-            player[0] = player[1] = HUMAN;
-            turn = 0;
-            break;
-    }
     newGame(width, height, num_to_connect);
-    //poll(print_dot, CLOCKS_PER_SEC/2);
 
-    do {
-        if (player[turn] == HUMAN) {
-            do {
-                move = 2; // NUM OF THE COLUMN !!
-            }
-            while (!makeMove(turn, move, NULL));
-        }
-        else {
-            /* move + 1 = column chosen by AI. */
-            autoMove(turn, level[turn], &move, NULL);
-        }
-        turn = !turn;
-    } while (!isWinner(0) && !isWinner(1) && !isTie());
-
-    if (isWinner(0)) {
-        if (num_of_players == 1)
-            printf("You won!");
-        else
-            printf("Player won!");
-        winCoords(&x1, &y1, &x2, &y2);
-        printf("  (%d,%d) to (%d,%d)\n\n", x1+1, y1+1, x2+1, y2+1);
-    }
-    else if (isWinner(1)) {
-        if (num_of_players == 1)
-            printf("I won!");
-        else
-            printf("Player won!");
-        winCoords(&x1, &y1, &x2, &y2);
-        printf("  (%d,%d) to (%d,%d)\n\n", x1+1, y1+1, x2+1, y2+1);
-    }
-    else {
-        printf("There was a tie!\n\n");
-    }
-
-    endGame();
 }
 
 void Engine::poll(void (*poll_func)(void), clock_t interval)
@@ -103,9 +48,6 @@ void Engine::newGame(int width, int height, int num)
     num_to_connect = num;
     magic_win_number = 1 << num_to_connect;
     win_places = numOfWinPlaces(size_x, size_y, num_to_connect);
-
-    /* Set up a random seed for making random decisions when there is */
-    /* equal goodness between two moves.                              */
 
     if (!seed_chosen) {
         srand((unsigned int) time((time_t *) 0));
@@ -204,12 +146,6 @@ void Engine::newGame(int width, int height, int num)
             win_index++;
         }
 
-    /* Set up the order in which automatic moves should be tried. */
-    /* The columns nearer to the center of the board are usually  */
-    /* better tactically and are more likely to lead to a win.    */
-    /* By ordering the search such that the central columns are   */
-    /* tried first, alpha-beta cutoff is much more effective.     */
-
     drop_order = (int *) emalloc(size_x * sizeof(int));
     column = (size_x-1) / 2;
     for (i = 1; i <= size_x; i++) {
@@ -218,6 +154,26 @@ void Engine::newGame(int width, int height, int num)
     }
 
     game_in_progress = true;
+}
+
+int Engine::getLastAIcolumn()
+{
+    return lastAIcolumn;
+}
+
+int Engine::getLastAIrow()
+{
+    return lastAIrow;
+}
+
+bool Engine::makeMove(int player, int column)
+{
+    bool ret;
+    ret = makeMove(player, column, NULL);
+    // TODO: turn & level hardcoded!
+    ret = autoMove(0, 5, &lastAIcolumn, &lastAIrow);
+
+    return ret;
 }
 
 bool Engine::makeMove(int player, int column, int *row)
@@ -245,10 +201,6 @@ bool Engine::autoMove(int player, int level, int *column, int *row)
 
     real_player = real_player(player);
 
-    /* It has been proven that the best first move for a standard 7x6 game  */
-    /* of connect-4 is the center column.  See Victor Allis' masters thesis */
-    /* ("ftp://ftp.cs.vu.nl/pub/victor/connect4.ps") for this proof.        */
-
     if (current_state->numOfPieces < 2 &&
                         size_x == 7 && size_y == 6 && num_to_connect == 4 &&
                         (current_state->numOfPieces == 0 ||
@@ -271,35 +223,25 @@ bool Engine::autoMove(int player, int level, int *column, int *row)
 
         result = dropPiece(real_player, current_column);
 
-        /* If this column is full, ignore it as a possibility. */
         if (result < 0) {
             pop_state();
             continue;
         }
-
-        /* If this drop wins the game, take it! */
         else if (current_state->winner == real_player) {
             best_column = current_column;
             pop_state();
             break;
         }
-
-        /* Otherwise, look ahead to see how good this move may turn out */
-        /* to be (assuming the opponent makes the best moves possible). */
         else {
             next_poll = clock() + poll_interval;
             goodness = evaluate(real_player, level, -(INT_MAX), -best_worst);
         }
 
-        /* If this move looks better than the ones previously considered, */
-        /* remember it.                                                   */
         if (goodness > best_worst) {
             best_worst = goodness;
             best_column = current_column;
             num_of_equal = 1;
         }
-
-        /* If two moves are equally as good, make a random decision. */
         else if (goodness == best_worst) {
             num_of_equal++;
             if ((rand()>>4) % num_of_equal == 0)
@@ -310,8 +252,6 @@ bool Engine::autoMove(int player, int level, int *column, int *row)
     }
 
     move_in_progress = false;
-
-    /* Drop the piece in the column decided upon. */
 
     if (best_column >= 0) {
         result = dropPiece(real_player, best_column);
@@ -453,7 +393,7 @@ void Engine::updateScore(int player, int x, int y)
     int **current_scoreArray = current_state->scoreArray;
     int other_player = other(player);
 
-    for (i=0; map[x][y][i] != -1; i++) {
+    for (i = 0; map[x][y][i] != -1; i++) {
         win_index = map[x][y][i];
         this_difference += current_scoreArray[player][win_index];
         other_difference += current_scoreArray[other_player][win_index];
@@ -514,7 +454,7 @@ void Engine::pushState(void)
 
     /* Copy the board */
 
-    for (i=0; i<size_x; i++)
+    for (i = 0; i < size_x; i++)
         memcpy(new_state->board[i], old_state->board[i], size_y);
 
     /* Copy the score array */
@@ -551,7 +491,7 @@ int Engine::evaluate(int player, int level, int alpha, int beta)
         /* Assume it is the other player's turn. */
         int best = -(INT_MAX);
         int maxab = alpha;
-        for(int i=0; i<size_x; i++) {
+        for(int i = 0; i < size_x; i++) {
             if (current_state->board[drop_order[i]][size_y-1] != NONE)
                 continue; /* The column is full. */
             pushState();
@@ -567,7 +507,6 @@ int Engine::evaluate(int player, int level, int alpha, int beta)
                 break;
         }
 
-        /* What's good for the other player is bad for this one. */
         return -best;
     }
 }
@@ -576,7 +515,7 @@ void * Engine::emalloc(size_t size)
 {
     void *ptr = malloc(size);
     if (ptr == NULL) {
-        fprintf(stderr, "c4: emalloc() - Can't allocate %ld bytes.\n",
+        fprintf(stderr, "emalloc() - Can't allocate %ld bytes.\n",
                 (long) size);
         exit(1);
     }
